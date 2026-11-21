@@ -213,6 +213,7 @@ def seed():
     except Exception as exc:
         db.rollback()
         logger.error("Error during database seed: %s", exc, exc_info=True)
+        raise
     finally:
         db.close()
 
