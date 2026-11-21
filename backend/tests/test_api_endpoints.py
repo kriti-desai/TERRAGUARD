@@ -13,6 +13,20 @@ def test_health_and_root(client):
     assert res_health.json()["status"] == "healthy"
 
 
+def test_cors_headers_accept_configured_origin(client):
+    """Verify CORS configuration allows origins and OPTIONS preflight."""
+    res_cors = client.options(
+        "/health",
+        headers={
+            "Origin": "https://terraguard.vercel.app",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    # Status code 200 for CORS preflight
+    assert res_cors.status_code == 200
+    assert "access-control-allow-origin" in res_cors.headers
+
+
 def test_dashboard_endpoints(client, analyst_headers, db_session):
     """Verify dashboard summary, risk-distribution and recent-activity endpoints."""
     # Seed a location with assessment

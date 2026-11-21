@@ -28,19 +28,24 @@ flowchart LR
    - **Environment:** `Python 3`
    - **Build Command:** `pip install -r requirements.txt`
    - **Start Command:** `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-4. Configure **Environment Variables** in Render dashboard:
+4. Configure **Environment Variables** in Render dashboard (or automatically via `render.yaml` Blueprint):
    ```env
    SECRET_KEY=generate-a-random-32-byte-hex-string
    ALGORITHM=HS256
    ACCESS_TOKEN_EXPIRE_MINUTES=1440
    DATABASE_URL=postgresql://user:password@host/dbname
+   CORS_ORIGINS=https://terraguard.vercel.app,http://localhost:5173
+   INITIAL_ADMIN_EMAIL=admin@terraguard.in
+   INITIAL_ADMIN_PASSWORD=your-secure-random-admin-password
    UPLOAD_DIR=./uploads
    MAX_UPLOAD_SIZE_MB=50
    ```
+   *(Note: When using Render Blueprints (`render.yaml`), `DATABASE_URL` is automatically linked from the provisioned PostgreSQL database and `INITIAL_ADMIN_PASSWORD` is generated automatically.)*
 5. Deploy and execute database seeder via Render Shell:
    ```bash
    python seed.py
    ```
+   The seeder creates initial tables, ingests the baseline dataset, and initializes your admin account using `INITIAL_ADMIN_PASSWORD`. Default public passwords are never used in production.
    Your backend API will be live at `https://terraguard-api.onrender.com`.
 
 ---
@@ -86,5 +91,5 @@ npm run dev
 ```
 
 Visit `http://localhost:5173`.
-Default Admin Login: `admin@terraguard.in` / `Admin@123`
-Default Analyst Login: `analyst@terraguard.in` / `Analyst@123`
+- Configure initial admin credentials in `backend/.env` using `INITIAL_ADMIN_EMAIL` and `INITIAL_ADMIN_PASSWORD` (or run `python seed.py`).
+- Additional analyst accounts can be registered directly through the web application's **Register** page (`/register`).

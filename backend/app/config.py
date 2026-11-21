@@ -13,6 +13,11 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = str(BACKEND_DIR / "uploads")
     MAX_UPLOAD_SIZE_MB: int = 50
     CORS_ORIGINS: str = "*"
+    FRONTEND_URL: str = ""
+    INITIAL_ADMIN_EMAIL: str = "admin@terraguard.in"
+    INITIAL_ADMIN_PASSWORD: str = ""
+    ADMIN_EMAIL: str = ""
+    ADMIN_PASSWORD: str = ""
     ENVIRONMENT: str = "development"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

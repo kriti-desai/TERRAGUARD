@@ -51,7 +51,19 @@ app = FastAPI(
 )
 
 # CORS setup
-origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
+# Accepts comma-separated origins from CORS_ORIGINS as well as FRONTEND_URL
+raw_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
+if getattr(settings, "FRONTEND_URL", None):
+    for fo in [o.strip() for o in settings.FRONTEND_URL.split(",") if o.strip()]:
+        if fo not in raw_origins:
+            raw_origins.append(fo)
+
+origins = []
+for o in raw_origins:
+    cleaned = o.rstrip("/") if o != "*" else o
+    if cleaned and cleaned not in origins:
+        origins.append(cleaned)
+
 if not origins:
     origins = ["*"]
 

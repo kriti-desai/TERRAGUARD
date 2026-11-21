@@ -8,7 +8,7 @@ Run: python seed.py
 import sys
 import os
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Set python path to backend root
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -18,6 +18,7 @@ from app.models import User, UserRole, Dataset, DatasetStatus, Observation, Loca
 from app.auth import hash_password
 from app.services.dataset_service import parse_csv
 from app.services.analysis_service import run_full_analysis
+from app.config import settings
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -28,38 +29,92 @@ def seed():
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     
+    is_production = settings.ENVIRONMENT.lower() == "production"
+
     try:
         # 1. Admin User
-        admin = db.query(User).filter(User.email == "admin@terraguard.in").first()
-        if not admin:
-            admin = User(
-                email="admin@terraguard.in",
-                full_name="TERRAGUARD Administrator",
-                hashed_password=hash_password("Admin@123"),
-                role=UserRole.ADMIN.value,
-            )
-            db.add(admin)
-            db.commit()
-            db.refresh(admin)
-            logger.info("Created Admin User: admin@terraguard.in / Admin@123")
-        else:
-            logger.info("Admin user already exists.")
+        admin_email = (
+            os.getenv("ADMIN_EMAIL")
+            or os.getenv("INITIAL_ADMIN_EMAIL")
+            or getattr(settings, "ADMIN_EMAIL", None)
+            or getattr(settings, "INITIAL_ADMIN_EMAIL", "admin@terraguard.in")
+        ).strip()
+        admin_password = (
+            os.getenv("ADMIN_PASSWORD")
+            or os.getenv("INITIAL_ADMIN_PASSWORD")
+            or getattr(settings, "ADMIN_PASSWORD", None)
+            or getattr(settings, "INITIAL_ADMIN_PASSWORD", "")
+        ).strip()
 
-        # 2. Analyst User
-        analyst = db.query(User).filter(User.email == "analyst@terraguard.in").first()
-        if not analyst:
-            analyst = User(
-                email="analyst@terraguard.in",
-                full_name="Lead Geodesy Analyst",
-                hashed_password=hash_password("Analyst@123"),
-                role=UserRole.ANALYST.value,
-            )
-            db.add(analyst)
-            db.commit()
-            db.refresh(analyst)
-            logger.info("Created Analyst User: analyst@terraguard.in / Analyst@123")
+        admin = None
+
+        if is_production:
+            if admin_password in ("Admin@123", "admin123", "admin", "password"):
+                logger.error(
+                    "SECURITY REJECTION: Refusing to provision production admin with publicly documented default password! "
+                    "Configure a secure INITIAL_ADMIN_PASSWORD / ADMIN_PASSWORD in your environment variables."
+                )
+            elif admin_password:
+                admin = db.query(User).filter(User.email.ilike(admin_email)).first()
+                if not admin:
+                    admin = User(
+                        email=admin_email,
+                        full_name=os.getenv("ADMIN_NAME") or "TERRAGUARD Administrator",
+                        hashed_password=hash_password(admin_password),
+                        role=UserRole.ADMIN.value,
+                    )
+                    db.add(admin)
+                    db.commit()
+                    db.refresh(admin)
+                    logger.info("Created production Admin User: %s using environment credentials.", admin_email)
+                else:
+                    logger.info("Admin user '%s' already exists in database.", admin_email)
+            else:
+                admin = db.query(User).filter(User.role == UserRole.ADMIN.value).first()
+                if admin:
+                    logger.info("Found existing admin user '%s' in database.", admin.email)
+                else:
+                    logger.warning(
+                        "Production mode: No INITIAL_ADMIN_PASSWORD / ADMIN_PASSWORD provided and no admin found. "
+                        "Skipping admin creation to avoid deploying default passwords."
+                    )
         else:
-            logger.info("Analyst user already exists.")
+            # Development mode: allow environment credentials or fallback to dev defaults for local testing
+            dev_admin_email = admin_email or "admin@terraguard.in"
+            dev_admin_password = admin_password or "Admin@123"
+            admin = db.query(User).filter(User.email.ilike(dev_admin_email)).first()
+            if not admin:
+                admin = User(
+                    email=dev_admin_email,
+                    full_name="TERRAGUARD Administrator",
+                    hashed_password=hash_password(dev_admin_password),
+                    role=UserRole.ADMIN.value,
+                )
+                db.add(admin)
+                db.commit()
+                db.refresh(admin)
+                logger.info("Created Development Admin User: %s", dev_admin_email)
+            else:
+                logger.info("Admin user '%s' already exists.", dev_admin_email)
+
+        # 2. Analyst User (Development/demo only - skipped in production to avoid default passwords)
+        if not is_production:
+            analyst = db.query(User).filter(User.email == "analyst@terraguard.in").first()
+            if not analyst:
+                analyst = User(
+                    email="analyst@terraguard.in",
+                    full_name="Lead Geodesy Analyst",
+                    hashed_password=hash_password("Analyst@123"),
+                    role=UserRole.ANALYST.value,
+                )
+                db.add(analyst)
+                db.commit()
+                db.refresh(analyst)
+                logger.info("Created Development Analyst User: analyst@terraguard.in")
+            else:
+                logger.info("Analyst user already exists.")
+        else:
+            logger.info("Production mode: Skipping default demonstration analyst account creation.")
 
         # 3. Ingest Sample Dataset if not already present
         sample_csv = Path(__file__).resolve().parent / "datasets" / "sample_data" / "sample_observations.csv"
@@ -77,8 +132,8 @@ def seed():
                 total_records=len(df),
                 valid_records=len(df),
                 upload_notes="Initial bundled demonstration dataset (Jharkhand & Odisha Coal/Mineral Belts)",
-                uploaded_by=admin.id,
-                processed_at=datetime.utcnow(),
+                uploaded_by=admin.id if admin else None,
+                processed_at=datetime.now(timezone.utc),
             )
             db.add(dataset)
             db.flush()
@@ -134,19 +189,22 @@ def seed():
             logger.info("Saved %d observations across locations into dataset #%d", len(df), dataset.id)
 
             # 4. Run ML Analysis pipeline on the dataset
-            logger.info("Executing initial AI anomaly detection and risk scoring pipeline...")
-            analysis_summary = run_full_analysis(
-                dataset_id=dataset.id,
-                user_id=admin.id,
-                contamination=0.15,
-                db=db,
-            )
-            logger.info(
-                "Analysis complete: %d anomalies detected, %d locations assessed, %d alerts generated.",
-                analysis_summary["anomalies_detected"],
-                analysis_summary["locations_assessed"],
-                analysis_summary["alerts_created"],
-            )
+            if admin:
+                logger.info("Executing initial AI anomaly detection and risk scoring pipeline...")
+                analysis_summary = run_full_analysis(
+                    dataset_id=dataset.id,
+                    user_id=admin.id,
+                    contamination=0.15,
+                    db=db,
+                )
+                logger.info(
+                    "Analysis complete: %d anomalies detected, %d locations assessed, %d alerts generated.",
+                    analysis_summary["anomalies_detected"],
+                    analysis_summary["locations_assessed"],
+                    analysis_summary["alerts_created"],
+                )
+            else:
+                logger.info("Skipping automatic initial ML analysis: no admin account available yet.")
         else:
             logger.info("Sample dataset already present or file missing.")
 

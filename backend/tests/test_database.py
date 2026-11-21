@@ -115,3 +115,83 @@ def test_risk_assessment_and_alert_generation(db_session):
     assert alert.location_id == loc.id
     assert alert.risk_level == "HIGH"
     assert alert.status == "NEW"
+
+
+def test_normalize_database_url_postgresql_variants():
+    """Verify normalize_database_url handles all PostgreSQL and Render URL patterns."""
+    from app.database import normalize_database_url
+
+    # Legacy Render/Heroku postgres:// URL
+    render_url = "postgres://tg_user:tg_pass@dpg-abc123-a.oregon-postgres.render.com/tg_db"
+    normalized = normalize_database_url(render_url)
+    assert normalized.startswith("postgresql+psycopg2://")
+    assert "tg_user:tg_pass" in normalized
+
+    # Standard postgresql:// URL without driver
+    pg_url = "postgresql://tg_user:tg_pass@localhost:5432/tg_db"
+    normalized_pg = normalize_database_url(pg_url)
+    assert normalized_pg.startswith("postgresql+psycopg2://")
+
+    # Already explicit postgresql+psycopg2:// URL
+    explicit_url = "postgresql+psycopg2://tg_user:tg_pass@localhost:5432/tg_db"
+    assert normalize_database_url(explicit_url) == explicit_url
+
+    # SQLite URL preserved
+    sqlite_url = "sqlite:///./terraguard.db"
+    assert normalize_database_url(sqlite_url) == sqlite_url
+
+    # Whitespace stripping
+    assert normalize_database_url("  postgresql://user:pw@host/db  ") == "postgresql+psycopg2://user:pw@host/db"
+
+
+def test_seed_production_disallows_default_password(monkeypatch, db_session):
+    """Verify seed() in production refuses to create accounts with default passwords."""
+    import sys
+    import os
+    backend_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    if backend_path not in sys.path:
+        sys.path.insert(0, backend_path)
+    import seed
+    from tests.conftest import TestingSessionLocal, test_engine
+    from app.config import settings
+
+    monkeypatch.setattr(seed, "SessionLocal", TestingSessionLocal)
+    monkeypatch.setattr(seed, "engine", test_engine)
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    monkeypatch.setenv("INITIAL_ADMIN_PASSWORD", "Admin@123")
+    monkeypatch.setenv("INITIAL_ADMIN_EMAIL", "prod_admin_reject@terraguard.in")
+
+    seed.seed()
+
+    user = db_session.query(User).filter(User.email == "prod_admin_reject@terraguard.in").first()
+    assert user is None
+
+
+def test_seed_production_with_secure_password(monkeypatch, db_session):
+    """Verify seed() in production succeeds with secure environment credentials."""
+    import sys
+    import os
+    backend_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    if backend_path not in sys.path:
+        sys.path.insert(0, backend_path)
+    import seed
+    from tests.conftest import TestingSessionLocal, test_engine
+    from app.config import settings
+    from app.auth import verify_password
+
+    monkeypatch.setattr(seed, "SessionLocal", TestingSessionLocal)
+    monkeypatch.setattr(seed, "engine", test_engine)
+    secure_pass = "VerySecureRand#987654321!"
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    monkeypatch.setenv("INITIAL_ADMIN_PASSWORD", secure_pass)
+    monkeypatch.setenv("INITIAL_ADMIN_EMAIL", "secure_admin@terraguard.in")
+
+    seed.seed()
+
+    user = db_session.query(User).filter(User.email == "secure_admin@terraguard.in").first()
+    assert user is not None
+    assert user.role == "admin"
+    assert verify_password(secure_pass, user.hashed_password)
+    # Default analyst should NOT be created in production
+    analyst = db_session.query(User).filter(User.email == "analyst@terraguard.in").first()
+    assert analyst is None
