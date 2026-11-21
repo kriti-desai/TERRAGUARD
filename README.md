@@ -169,14 +169,9 @@ Optimized chunk splitting isolates heavy geospatial/plotting libraries (`plotly-
 
 ## 🔐 Demonstration Credentials
 
-The database seeder automatically configures two role-based user accounts:
+Demo accounts are created by the database seeder for local development.
 
-| Role | Email | Password | Access Privileges |
-|---|---|---|---|
-| **Administrator** | `admin@terraguard.in` | `Admin@123` | Full access: Upload datasets, run ML pipelines, manage users & alerts |
-| **Analyst** | `analyst@terraguard.in` | `Analyst@123` | Operational access: Maps, historical trends, alerts, PDF reports |
-
-You can also self-register any new account directly from the **Register** page.
+For security, configure your own credentials before running the application. Never use default demonstration credentials in production.
 
 ---
 
