@@ -195,3 +195,25 @@ def test_seed_production_with_secure_password(monkeypatch, db_session):
     # Default analyst should NOT be created in production
     analyst = db_session.query(User).filter(User.email == "analyst@terraguard.in").first()
     assert analyst is None
+
+
+def test_seed_reraises_on_exception(monkeypatch):
+    """Verify seed() re-raises exceptions so failures exit with non-zero status."""
+    import sys
+    import os
+    backend_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    if backend_path not in sys.path:
+        sys.path.insert(0, backend_path)
+    import seed
+    from tests.conftest import TestingSessionLocal, test_engine
+
+    def mock_failing_session():
+        session = TestingSessionLocal()
+        session.query = lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Simulated database failure during seeding"))
+        return session
+
+    monkeypatch.setattr(seed, "SessionLocal", mock_failing_session)
+    monkeypatch.setattr(seed, "engine", test_engine)
+
+    with pytest.raises(RuntimeError, match="Simulated database failure during seeding"):
+        seed.seed()
